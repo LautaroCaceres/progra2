@@ -11,6 +11,7 @@ const STROKE_WEIGHT_GRID = 1;
 const MAX_FIGURES_PER_CELL = 40;
 const TREMOR_INTENSITY = 0.02;
 const MOVE_IMPULSE = 0.1;
+const WAVE_SPEED = 0.04;
 const REMOVE_INTERVAL = 6;
 
 let cellSize;
@@ -18,6 +19,10 @@ let densityMap = [];
 let baseDensityMap = [];
 let tremorActive = false;
 let moveImpulse = 0;
+let waveActive = false;
+let waveHold = false;
+let waveBaseMap = [];
+let waveProgress = 0;
 let leftHold = false;
 let addFigureCounter = 0;
 let removeMode = false;
@@ -30,6 +35,10 @@ function setup() {
         if (e.button === 1 || e.button === 2) {
             e.preventDefault();
         }
+    };
+    canvas.elt.onwheel = e => {
+        e.preventDefault();
+        triggerWaveEffect();
     };
     cellSize = width / GRID_SIZE;
     generateDensityMap();
@@ -55,6 +64,10 @@ function draw() {
         }
     }
 
+    if (waveActive) {
+        applyWaveEffect();
+    }
+
     // Por ahora, solo dibujar sin efectos
     drawCells();
 }
@@ -67,19 +80,45 @@ function mousePressed(event) {
     if (event.button === 2) {
         tremorActive = true;
     }
+
+    if (event.button === 1 || (event.button === 0 && keyIsPressed && key === 'Shift')) {
+        waveHold = true;
+        waveActive = true;
+        waveProgress = 0;
+        waveBaseMap = densityMap.slice();
+    }
 }
 
 function mouseReleased(event) {
     if (event.button === 0) {
-        leftHold = false;
-        addFigureCounter = 0;
-        removeMode = true;
+        if (waveHold) {
+            waveHold = false;
+            waveActive = false;
+            densityMap = waveBaseMap.slice();
+        } else {
+            leftHold = false;
+            addFigureCounter = 0;
+            removeMode = true;
+        }
     }
 
     if (event.button === 2) {
         tremorActive = false;
     }
 
+    if (event.button === 1) {
+        waveHold = false;
+        waveActive = false;
+        densityMap = waveBaseMap.slice();
+    }
+}
+
+function triggerWaveEffect() {
+    if (!waveActive) {
+        waveActive = true;
+        waveProgress = 0;
+        waveBaseMap = densityMap.slice();
+    }
 }
 
 function mouseClicked() {
@@ -157,6 +196,28 @@ function applyTremor() {
 
 function applyMoveImpulse() {
     // El impulso se aplica en drawCells
+}
+
+function applyWaveEffect() {
+    waveProgress += WAVE_SPEED;
+    if (waveProgress > 1) {
+        waveProgress = 1;
+    }
+
+    if (waveProgress >= 1 && !waveHold) {
+        waveActive = false;
+    }
+
+    for (let row = 0; row < GRID_SIZE; row++) {
+        const rowFactor = constrain((waveProgress * GRID_SIZE - (GRID_SIZE - 1 - row)) / 1, 0, 1);
+        const maxDensity = min(MAX_FIGURES_PER_CELL, waveBaseMap[row * GRID_SIZE] + 15);
+        for (let col = 0; col < GRID_SIZE; col++) {
+            const index = row * GRID_SIZE + col;
+            const baseDensity = waveBaseMap[index];
+            const targetDensity = floor(baseDensity + (maxDensity - baseDensity) * rowFactor);
+            densityMap[index] = max(1, targetDensity);
+        }
+    }
 }
 
 
