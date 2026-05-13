@@ -249,5 +249,6 @@ function drawJitteredSquare(cx, cy, size, cellX, cellY, cellWidth, cellIndex, sh
     beginShape();
     vertices.forEach(v => vertex(v.x, v.y));
     endShape(CLOSE);
+    //asd
 }
  
