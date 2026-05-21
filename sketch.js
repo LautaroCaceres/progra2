@@ -17,12 +17,13 @@ const REMOVE_INTERVAL = 6;
 let cellSize;
 let densityMap = [];
 let baseDensityMap = [];
-let tremorActive = false;
+let tremorActive = true;
 let moveImpulse = 0;
 let waveActive = false;
 let waveHold = false;
-let waveBaseMap = [];
+let waveReleasing = false;
 let waveProgress = 0;
+let waveOverlayMap = [];
 let leftHold = false;
 let addFigureCounter = 0;
 let removeMode = false;
@@ -36,13 +37,10 @@ function setup() {
             e.preventDefault();
         }
     };
-    canvas.elt.onwheel = e => {
-        e.preventDefault();
-        triggerWaveEffect();
-    };
     cellSize = width / GRID_SIZE;
     generateDensityMap();
     baseDensityMap = densityMap.slice();
+    waveOverlayMap = Array(GRID_SIZE * GRID_SIZE).fill(0);
 }
 
 function draw() {
@@ -59,16 +57,17 @@ function draw() {
     } else if (removeMode) {
         removeCounter++;
         if (removeCounter >= REMOVE_INTERVAL) {
-            removeRandomFigures();
+            removeRandomFigures(true);
             removeCounter = 0;
         }
     }
 
-    if (waveActive) {
+    tremorActive = mouseX >= width / 2;
+
+    if (waveActive || waveReleasing) {
         applyWaveEffect();
     }
 
-    // Por ahora, solo dibujar sin efectos
     drawCells();
 }
 
@@ -77,52 +76,57 @@ function mousePressed(event) {
         leftHold = true;
     }
 
-    if (event.button === 2) {
-        tremorActive = true;
-    }
-
-    if (event.button === 1 || (event.button === 0 && keyIsPressed && key === 'Shift')) {
+    if (event.button === 1) {
         waveHold = true;
+        waveReleasing = false;
         waveActive = true;
         waveProgress = 0;
-        waveBaseMap = densityMap.slice();
+        waveOverlayMap.fill(0);
     }
 }
 
 function mouseReleased(event) {
     if (event.button === 0) {
-        if (waveHold) {
-            waveHold = false;
-            waveActive = false;
-            densityMap = waveBaseMap.slice();
-        } else {
-            leftHold = false;
-            addFigureCounter = 0;
-            removeMode = true;
-        }
-    }
-
-    if (event.button === 2) {
-        tremorActive = false;
+        leftHold = false;
+        addFigureCounter = 0;
+        removeMode = true;
     }
 
     if (event.button === 1) {
         waveHold = false;
-        waveActive = false;
-        densityMap = waveBaseMap.slice();
-    }
-}
-
-function triggerWaveEffect() {
-    if (!waveActive) {
+        waveReleasing = true;
         waveActive = true;
-        waveProgress = 0;
-        waveBaseMap = densityMap.slice();
     }
 }
 
 function mouseClicked() {
     // Nada por ahora
+}
+
+function keyPressed() {
+    if (key === ' ') {
+        swapRandomCells();
+        return false;
+    }
+}
+
+function swapRandomCells() {
+    const cellCount = floor(random(10, 21));
+    const selectedCells = [];
+    
+    while (selectedCells.length < cellCount) {
+        const cell = floor(random(GRID_SIZE * GRID_SIZE));
+        if (!selectedCells.includes(cell)) {
+            selectedCells.push(cell);
+        }
+    }
+    
+    const values = selectedCells.map(i => densityMap[i]);
+    const shuffledValues = shuffle(values);
+    
+    for (let i = 0; i < selectedCells.length; i++) {
+        densityMap[selectedCells[i]] = shuffledValues[i];
+    }
 }
 
 function generateDensityMap() {
@@ -162,7 +166,7 @@ function addRandomFigures() {
     }
 }
 
-function removeRandomFigures() {
+function removeRandomFigures(isFast = false) {
     let removed = false;
     const candidates = [];
     for (let i = 0; i < densityMap.length; i++) {
@@ -176,7 +180,7 @@ function removeRandomFigures() {
         return;
     }
 
-    const removeCount = min(3, candidates.length);
+    const removeCount = isFast ? min(floor(random(2, 5)) * 4, candidates.length) : min(3, candidates.length);
     for (let k = 0; k < removeCount; k++) {
         const idx = candidates[floor(random(candidates.length))];
         if (densityMap[idx] > baseDensityMap[idx]) {
@@ -199,23 +203,31 @@ function applyMoveImpulse() {
 }
 
 function applyWaveEffect() {
-    waveProgress += WAVE_SPEED;
-    if (waveProgress > 1) {
-        waveProgress = 1;
+    if (waveHold) {
+        waveProgress += WAVE_SPEED;
+        if (waveProgress > 1) {
+            waveProgress = 1;
+        }
+    } else if (waveReleasing) {
+        waveProgress -= WAVE_SPEED;
+        if (waveProgress < 0) {
+            waveProgress = 0;
+        }
     }
 
-    if (waveProgress >= 1 && !waveHold) {
+    if (!waveHold && waveProgress === 0) {
         waveActive = false;
+        waveReleasing = false;
+        waveOverlayMap.fill(0);
+        return;
     }
 
     for (let row = 0; row < GRID_SIZE; row++) {
         const rowFactor = constrain((waveProgress * GRID_SIZE - (GRID_SIZE - 1 - row)) / 1, 0, 1);
-        const maxDensity = min(MAX_FIGURES_PER_CELL, waveBaseMap[row * GRID_SIZE] + 15);
+        const extraCount = floor(15 * rowFactor);
         for (let col = 0; col < GRID_SIZE; col++) {
             const index = row * GRID_SIZE + col;
-            const baseDensity = waveBaseMap[index];
-            const targetDensity = floor(baseDensity + (maxDensity - baseDensity) * rowFactor);
-            densityMap[index] = max(1, targetDensity);
+            waveOverlayMap[index] = max(0, extraCount);
         }
     }
 }
@@ -241,7 +253,7 @@ function drawCells() {
     for (let row = 0; row < GRID_SIZE; row++) {
         for (let col = 0; col < GRID_SIZE; col++) {
             const index = row * GRID_SIZE + col;
-            const repeats = densityMap[index];
+            const repeats = densityMap[index] + waveOverlayMap[index];
             const cellX = col * cellSize;
             const cellY = row * cellSize;
             drawCellFigures(cellX, cellY, repeats);
@@ -310,6 +322,6 @@ function drawJitteredSquare(cx, cy, size, cellX, cellY, cellWidth, cellIndex, sh
     beginShape();
     vertices.forEach(v => vertex(v.x, v.y));
     endShape(CLOSE);
-    //asd
+    //preubaaa
 }
  
