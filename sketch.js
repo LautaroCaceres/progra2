@@ -10,120 +10,155 @@ const STROKE_WEIGHT_SHAPE = 1.8;
 const STROKE_WEIGHT_GRID = 1;
 const MAX_FIGURES_PER_CELL = 40;
 const TREMOR_INTENSITY = 0.02;
-const MOVE_IMPULSE = 0.1;
 const WAVE_SPEED = 0.04;
 const REMOVE_INTERVAL = 6;
+
+// Umbrales de sonido
+const SILENCE_THRESHOLD = 0.05;
+const SWAP_PEAK_THRESHOLD = 0.05;
+const SWAP_COOLDOWN = 60;
+const TREBLE_WAVE_THRESHOLD = 60;
 
 let cellSize;
 let densityMap = [];
 let baseDensityMap = [];
-let tremorActive = true;
-let moveImpulse = 0;
+let tremorActive = false;
 let waveActive = false;
 let waveHold = false;
 let waveReleasing = false;
 let waveProgress = 0;
 let waveOverlayMap = [];
-let leftHold = false;
 let addFigureCounter = 0;
-let removeMode = false;
 let removeCounter = 0;
+let removeMode = false;
+
+// Variables de sonido
+let mic;
+let fft;
+let amplitude;
+let audioStarted = false;
+let prevAmplitude = 0;
+let swapCooldown = 0;
 
 function setup() {
     const canvas = createCanvas(720, 720);
     canvas.elt.oncontextmenu = () => false;
-    canvas.elt.onmousedown = e => {
-        if (e.button === 1 || e.button === 2) {
-            e.preventDefault();
-        }
-    };
     cellSize = width / GRID_SIZE;
     generateDensityMap();
     baseDensityMap = densityMap.slice();
     waveOverlayMap = Array(GRID_SIZE * GRID_SIZE).fill(0);
 }
 
+function startAudio() {
+    if (audioStarted) return;
+    userStartAudio();
+    mic = new p5.AudioIn();
+    mic.start();
+    fft = new p5.FFT(0.8, 1024);
+    fft.setInput(mic);
+    amplitude = new p5.Amplitude();
+    amplitude.setInput(mic);
+    audioStarted = true;
+}
+
+function mousePressed() {
+    startAudio();
+}
+
 function draw() {
     background(255);
     drawGridLines();
 
-    if (leftHold) {
-        removeMode = false;
-        addFigureCounter++;
-        if (addFigureCounter >= 6) {
-            addRandomFigures();
-            addFigureCounter = 0;
-        }
-    } else if (removeMode) {
-        removeCounter++;
-        if (removeCounter >= REMOVE_INTERVAL) {
-            removeRandomFigures(true);
-            removeCounter = 0;
-        }
+    if (audioStarted) {
+        processSounds();
     }
-
-    tremorActive = mouseX >= width / 2;
 
     if (waveActive || waveReleasing) {
         applyWaveEffect();
     }
 
     drawCells();
+
+    // DEBUG - borrar después
+    if (audioStarted) {
+        fft.analyze();
+        const vol = fft.getEnergy(20, 20000) / 255;
+        const bassEnergy = fft.getEnergy("bass");
+        const trebleEnergy = fft.getEnergy("treble");
+
+        fill(255, 0, 0);
+        noStroke();
+        textSize(12);
+        text(`VOL: ${vol.toFixed(4)}`, 10, 20);
+        text(`BASS: ${bassEnergy.toFixed(1)}`, 10, 40);
+        text(`TREBLE: ${trebleEnergy.toFixed(1)}`, 10, 60);
+    }
 }
 
-function mousePressed(event) {
-    if (event.button === 0 && !keyIsPressed) {
-        leftHold = true;
+function processSounds() {
+    fft.analyze();
+    const vol = fft.getEnergy(20, 20000) / 255;
+    const bassEnergy = fft.getEnergy("bass");
+    const trebleEnergy = fft.getEnergy("treble");
+
+    // Temblor: silencio → tiembla, ruido → no tiembla
+    tremorActive = vol < SILENCE_THRESHOLD;
+
+    // Hablar normal o grave → agrega figuras
+    if (vol > SILENCE_THRESHOLD && trebleEnergy < TREBLE_WAVE_THRESHOLD) {
+        addFigureCounter++;
+        if (addFigureCounter >= 6) {
+            addRandomFigures();
+            addFigureCounter = 0;
+        }
+    } else {
+        addFigureCounter = 0;
     }
 
-    if (event.button === 1) {
+    // Silencio → quita figuras
+    if (vol < SILENCE_THRESHOLD) {
+        removeCounter++;
+        if (removeCounter >= REMOVE_INTERVAL) {
+            removeRandomFigures(true);
+            removeCounter = 0;
+        }
+    } else {
+        removeCounter = 0;
+    }
+
+    // Swap: pico repentino de volumen (aplauso)
+    if (swapCooldown > 0) swapCooldown--;
+    const peak = vol - prevAmplitude;
+    if (peak > SWAP_PEAK_THRESHOLD && swapCooldown === 0) {
+        swapRandomCells();
+        swapCooldown = SWAP_COOLDOWN;
+    }
+    prevAmplitude = vol;
+
+    // Ola: agudos (ssss, silbido)
+    const isWave = trebleEnergy > TREBLE_WAVE_THRESHOLD && vol > SILENCE_THRESHOLD;
+    if (isWave && !waveHold) {
         waveHold = true;
         waveReleasing = false;
         waveActive = true;
         waveProgress = 0;
         waveOverlayMap.fill(0);
-    }
-}
-
-function mouseReleased(event) {
-    if (event.button === 0) {
-        leftHold = false;
-        addFigureCounter = 0;
-        removeMode = true;
-    }
-
-    if (event.button === 1) {
+    } else if (!isWave && waveHold) {
         waveHold = false;
         waveReleasing = true;
         waveActive = true;
     }
 }
 
-function mouseClicked() {
-    // Nada por ahora
-}
-
-function keyPressed() {
-    if (key === ' ') {
-        swapRandomCells();
-        return false;
-    }
-}
-
 function swapRandomCells() {
     const cellCount = floor(random(10, 21));
     const selectedCells = [];
-    
     while (selectedCells.length < cellCount) {
         const cell = floor(random(GRID_SIZE * GRID_SIZE));
-        if (!selectedCells.includes(cell)) {
-            selectedCells.push(cell);
-        }
+        if (!selectedCells.includes(cell)) selectedCells.push(cell);
     }
-    
     const values = selectedCells.map(i => densityMap[i]);
     const shuffledValues = shuffle(values);
-    
     for (let i = 0; i < selectedCells.length; i++) {
         densityMap[selectedCells[i]] = shuffledValues[i];
     }
@@ -134,13 +169,10 @@ function generateDensityMap() {
     const lowCount = floor(totalCells * 0.20);
     const mediumCount = floor(totalCells * 0.45);
     const highCount = totalCells - lowCount - mediumCount;
-
     const allIndexes = Array.from({ length: totalCells }, (_, i) => i);
     const shuffled = shuffle(allIndexes);
-    
     const lowIndexes = new Set(shuffled.slice(0, lowCount));
     const mediumIndexes = new Set(shuffled.slice(lowCount, lowCount + mediumCount));
-
     for (let index = 0; index < totalCells; index++) {
         let repeats;
         if (lowIndexes.has(index)) {
@@ -170,16 +202,12 @@ function removeRandomFigures(isFast = false) {
     let removed = false;
     const candidates = [];
     for (let i = 0; i < densityMap.length; i++) {
-        if (densityMap[i] > baseDensityMap[i]) {
-            candidates.push(i);
-        }
+        if (densityMap[i] > baseDensityMap[i]) candidates.push(i);
     }
-
     if (candidates.length === 0) {
         removeMode = false;
         return;
     }
-
     const removeCount = isFast ? min(floor(random(2, 5)) * 4, candidates.length) : min(3, candidates.length);
     for (let k = 0; k < removeCount; k++) {
         const idx = candidates[floor(random(candidates.length))];
@@ -188,40 +216,23 @@ function removeRandomFigures(isFast = false) {
             removed = true;
         }
     }
-
-    if (!removed) {
-        removeMode = false;
-    }
-}
-
-function applyTremor() {
-    // El temblor se aplica en drawCells
-}
-
-function applyMoveImpulse() {
-    // El impulso se aplica en drawCells
+    if (!removed) removeMode = false;
 }
 
 function applyWaveEffect() {
     if (waveHold) {
         waveProgress += WAVE_SPEED;
-        if (waveProgress > 1) {
-            waveProgress = 1;
-        }
+        if (waveProgress > 1) waveProgress = 1;
     } else if (waveReleasing) {
         waveProgress -= WAVE_SPEED;
-        if (waveProgress < 0) {
-            waveProgress = 0;
-        }
+        if (waveProgress < 0) waveProgress = 0;
     }
-
     if (!waveHold && waveProgress === 0) {
         waveActive = false;
         waveReleasing = false;
         waveOverlayMap.fill(0);
         return;
     }
-
     for (let row = 0; row < GRID_SIZE; row++) {
         const rowFactor = constrain((waveProgress * GRID_SIZE - (GRID_SIZE - 1 - row)) / 1, 0, 1);
         const extraCount = floor(15 * rowFactor);
@@ -232,12 +243,10 @@ function applyWaveEffect() {
     }
 }
 
-
 function drawGridLines() {
     stroke(GRID_COLOR);
     strokeWeight(STROKE_WEIGHT_GRID);
     noFill();
-
     for (let i = 0; i <= GRID_SIZE; i++) {
         const position = i * cellSize;
         line(position, 0, position, height);
@@ -249,7 +258,6 @@ function drawCells() {
     stroke(DRAW_COLOR);
     strokeWeight(STROKE_WEIGHT_SHAPE);
     noFill();
-
     for (let row = 0; row < GRID_SIZE; row++) {
         for (let col = 0; col < GRID_SIZE; col++) {
             const index = row * GRID_SIZE + col;
@@ -283,14 +291,9 @@ function drawCellFigures(cellX, cellY, repeats) {
         let jitterX = stableRandomRange(cellIndex * 100 + i * 7 + 2, -cellSize * CELL_CENTER_JITTER, cellSize * CELL_CENTER_JITTER);
         let jitterY = stableRandomRange(cellIndex * 100 + i * 7 + 3, -cellSize * CELL_CENTER_JITTER, cellSize * CELL_CENTER_JITTER);
 
-        // Solo aplicar efectos dinámicos si se activan
         if (tremorActive) {
             jitterX += random(-TREMOR_INTENSITY * cellSize, TREMOR_INTENSITY * cellSize);
             jitterY += random(-TREMOR_INTENSITY * cellSize, TREMOR_INTENSITY * cellSize);
-        }
-        if (moveImpulse > 0) {
-            jitterX += random(-moveImpulse * cellSize, moveImpulse * cellSize);
-            jitterY += random(-moveImpulse * cellSize, moveImpulse * cellSize);
         }
 
         const squareCenterX = centerX + jitterX;
@@ -309,19 +312,14 @@ function drawJitteredSquare(cx, cy, size, cellX, cellY, cellWidth, cellIndex, sh
     ].map((vertex, vIndex) => {
         const jitterX = stableRandomRange(cellIndex * 100 + shapeIndex * 10 + vIndex * 3 + 4, -VERTEX_JITTER[1] * size, VERTEX_JITTER[1] * size);
         const jitterY = stableRandomRange(cellIndex * 100 + shapeIndex * 10 + vIndex * 3 + 5, -VERTEX_JITTER[1] * size, VERTEX_JITTER[1] * size);
-        
         const finalX = cx + vertex.x + jitterX;
         const finalY = cy + vertex.y + jitterY;
-        
         const constrainedX = constrain(finalX, cellX, cellX + cellWidth);
         const constrainedY = constrain(finalY, cellY, cellY + cellWidth);
-        
         return { x: constrainedX, y: constrainedY };
     });
 
     beginShape();
     vertices.forEach(v => vertex(v.x, v.y));
     endShape(CLOSE);
-    //preubaaa
 }
- 
