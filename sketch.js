@@ -81,19 +81,7 @@ function draw() {
     drawGrain();
 
     // DEBUG - borrar después
-    if (audioStarted) {
-        fft.analyze();
-        const vol = fft.getEnergy(20, 20000) / 255;
-        const bassEnergy = fft.getEnergy("bass");
-        const trebleEnergy = fft.getEnergy("treble");
-
-        fill(255, 0, 0);
-        noStroke();
-        textSize(12);
-        text(`VOL: ${vol.toFixed(4)}`, 10, 20);
-        text(`BASS: ${bassEnergy.toFixed(1)}`, 10, 40);
-        text(`TREBLE: ${trebleEnergy.toFixed(1)}`, 10, 60);
-    }
+    
 }
 
 function drawGrain() {
