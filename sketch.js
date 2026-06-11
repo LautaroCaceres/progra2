@@ -1,7 +1,7 @@
 ﻿const GRID_SIZE = 6;
-const LOW_DENSITY_REPEATS = [2, 5];
-const MEDIUM_DENSITY_REPEATS = [8, 12];
-const HIGH_DENSITY_REPEATS = [15, 30];
+const LOW_DENSITY_REPEATS = [1, 3];
+const MEDIUM_DENSITY_REPEATS = [10, 15];
+const HIGH_DENSITY_REPEATS = [30, 40];
 const VERTEX_JITTER = [0.10, 0.35];
 const CELL_CENTER_JITTER = 0.08;
 const GRID_COLOR = 220;
@@ -78,6 +78,7 @@ function draw() {
     }
 
     drawCells();
+    drawGrain();
 
     // DEBUG - borrar después
     if (audioStarted) {
@@ -92,6 +93,16 @@ function draw() {
         text(`VOL: ${vol.toFixed(4)}`, 10, 20);
         text(`BASS: ${bassEnergy.toFixed(1)}`, 10, 40);
         text(`TREBLE: ${trebleEnergy.toFixed(1)}`, 10, 60);
+    }
+}
+
+function drawGrain() {
+    stroke(0, 25);
+    strokeWeight(0.5);
+    for (let i = 0; i < 800; i++) {
+        const x = random(width);
+        const y = random(height);
+        point(x, y);
     }
 }
 
@@ -319,7 +330,22 @@ function drawJitteredSquare(cx, cy, size, cellX, cellY, cellWidth, cellIndex, sh
         return { x: constrainedX, y: constrainedY };
     });
 
-    beginShape();
-    vertices.forEach(v => vertex(v.x, v.y));
-    endShape(CLOSE);
+    const segments = 4;
+    for (let v = 0; v < vertices.length; v++) {
+        const a = vertices[v];
+        const b = vertices[(v + 1) % vertices.length];
+        for (let s = 0; s < segments; s++) {
+            const t1 = s / segments;
+            const t2 = (s + 1) / segments;
+            const x1 = lerp(a.x, b.x, t1);
+            const y1 = lerp(a.y, b.y, t1);
+            const x2 = lerp(a.x, b.x, t2);
+            const y2 = lerp(a.y, b.y, t2);
+            const sw = stableRandomRange(cellIndex * 100 + shapeIndex * 10 + v * segments + s + 99, 0.5, 2.5);
+            const op = stableRandomRange(cellIndex * 100 + shapeIndex * 10 + v * segments + s + 77, 120, 220);
+            stroke(DRAW_COLOR, op);
+            strokeWeight(sw);
+            line(x1, y1, x2, y2);
+        }
+    }
 }
