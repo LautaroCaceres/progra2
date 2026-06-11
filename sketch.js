@@ -318,7 +318,7 @@ function drawJitteredSquare(cx, cy, size, cellX, cellY, cellWidth, cellIndex, sh
         return { x: constrainedX, y: constrainedY };
     });
 
-    const segments = 4;
+    const segments = 2;
     for (let v = 0; v < vertices.length; v++) {
         const a = vertices[v];
         const b = vertices[(v + 1) % vertices.length];
