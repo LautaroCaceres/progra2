@@ -1,4 +1,4 @@
-﻿const GRID_SIZE = 6;
+const GRID_SIZE = 6;
 const LOW_DENSITY_REPEATS = [1, 3];
 const MEDIUM_DENSITY_REPEATS = [10, 15];
 const HIGH_DENSITY_REPEATS = [30, 40];
@@ -13,7 +13,7 @@ const TREMOR_INTENSITY = 0.02;
 const WAVE_SPEED = 0.04;
 const REMOVE_INTERVAL = 6;
 
-// Umbrales de sonido
+// Umbrales de sonido (valores iniciales, ajustables con el menú)
 const SILENCE_THRESHOLD = 0.05;
 const SWAP_PEAK_THRESHOLD = 0.05;
 const SWAP_COOLDOWN = 60;
@@ -30,15 +30,19 @@ let waveProgress = 0;
 let waveOverlayMap = [];
 let addFigureCounter = 0;
 let removeCounter = 0;
-let removeMode = false;
 
 // Variables de sonido
 let mic;
 let fft;
-let amplitude;
 let audioStarted = false;
 let prevAmplitude = 0;
 let swapCooldown = 0;
+
+// Variables del menú de ajuste
+let sliderSilence, sliderTreble, sliderSwapPeak;
+let menuVisible = false;
+let labelSilence, labelTreble, labelSwapPeak;
+let resetButton;
 
 function setup() {
     const canvas = createCanvas(720, 720);
@@ -47,6 +51,38 @@ function setup() {
     generateDensityMap();
     baseDensityMap = densityMap.slice();
     waveOverlayMap = Array(GRID_SIZE * GRID_SIZE).fill(0);
+
+    labelSilence = createDiv("Umbral de silencio (temblor / densidad)");
+    labelSilence.position(10, 730);
+    labelSilence.style("font-size", "12px");
+    labelSilence.hide();
+
+    sliderSilence = createSlider(0.01, 0.3, SILENCE_THRESHOLD, 0.01);
+    sliderSilence.position(10, 750);
+    sliderSilence.hide();
+
+    labelTreble = createDiv("Umbral de agudos (ola)");
+    labelTreble.position(10, 780);
+    labelTreble.style("font-size", "12px");
+    labelTreble.hide();
+
+    sliderTreble = createSlider(10, 150, TREBLE_WAVE_THRESHOLD, 1);
+    sliderTreble.position(10, 800);
+    sliderTreble.hide();
+
+    labelSwapPeak = createDiv("Sensibilidad de pico (swap / aplauso)");
+    labelSwapPeak.position(10, 830);
+    labelSwapPeak.style("font-size", "12px");
+    labelSwapPeak.hide();
+
+    sliderSwapPeak = createSlider(0.01, 0.3, SWAP_PEAK_THRESHOLD, 0.01);
+    sliderSwapPeak.position(10, 850);
+    sliderSwapPeak.hide();
+
+    resetButton = createButton("Restablecer valores");
+    resetButton.position(10, 880);
+    resetButton.mousePressed(resetSliders);
+    resetButton.hide();
 }
 
 function startAudio() {
@@ -56,13 +92,35 @@ function startAudio() {
     mic.start();
     fft = new p5.FFT(0.8, 1024);
     fft.setInput(mic);
-    amplitude = new p5.Amplitude();
-    amplitude.setInput(mic);
     audioStarted = true;
 }
 
 function mousePressed() {
     startAudio();
+}
+
+function keyPressed() {
+    if (key === ' ') {
+        menuVisible = !menuVisible;
+        if (menuVisible) {
+            sliderSilence.show();
+            sliderTreble.show();
+            sliderSwapPeak.show();
+            labelSilence.show();
+            labelTreble.show();
+            labelSwapPeak.show();
+            resetButton.show();
+        } else {
+            sliderSilence.hide();
+            sliderTreble.hide();
+            sliderSwapPeak.hide();
+            labelSilence.hide();
+            labelTreble.hide();
+            labelSwapPeak.hide();
+            resetButton.hide();
+        }
+        return false;
+    }
 }
 
 function draw() {
@@ -79,9 +137,6 @@ function draw() {
 
     drawCells();
     drawGrain();
-
-    // DEBUG - borrar después
-    
 }
 
 function drawGrain() {
@@ -97,14 +152,17 @@ function drawGrain() {
 function processSounds() {
     fft.analyze();
     const vol = fft.getEnergy(20, 20000) / 255;
-    const bassEnergy = fft.getEnergy("bass");
     const trebleEnergy = fft.getEnergy("treble");
 
+    const silenceVal = sliderSilence.value();
+    const trebleVal = sliderTreble.value();
+    const swapPeakVal = sliderSwapPeak.value();
+
     // Temblor: silencio → tiembla, ruido → no tiembla
-    tremorActive = vol < SILENCE_THRESHOLD;
+    tremorActive = vol < silenceVal;
 
     // Hablar normal o grave → agrega figuras
-    if (vol > SILENCE_THRESHOLD && trebleEnergy < TREBLE_WAVE_THRESHOLD) {
+    if (vol > silenceVal && trebleEnergy < trebleVal) {
         addFigureCounter++;
         if (addFigureCounter >= 6) {
             addRandomFigures();
@@ -115,7 +173,7 @@ function processSounds() {
     }
 
     // Silencio → quita figuras
-    if (vol < SILENCE_THRESHOLD) {
+    if (vol < silenceVal) {
         removeCounter++;
         if (removeCounter >= REMOVE_INTERVAL) {
             removeRandomFigures(true);
@@ -128,14 +186,14 @@ function processSounds() {
     // Swap: pico repentino de volumen (aplauso)
     if (swapCooldown > 0) swapCooldown--;
     const peak = vol - prevAmplitude;
-    if (peak > SWAP_PEAK_THRESHOLD && swapCooldown === 0) {
+    if (peak > swapPeakVal && swapCooldown === 0) {
         swapRandomCells();
         swapCooldown = SWAP_COOLDOWN;
     }
     prevAmplitude = vol;
 
     // Ola: agudos (ssss, silbido)
-    const isWave = trebleEnergy > TREBLE_WAVE_THRESHOLD && vol > SILENCE_THRESHOLD;
+    const isWave = trebleEnergy > trebleVal && vol > silenceVal;
     if (isWave && !waveHold) {
         waveHold = true;
         waveReleasing = false;
@@ -147,6 +205,12 @@ function processSounds() {
         waveReleasing = true;
         waveActive = true;
     }
+}
+
+function resetSliders() {
+    sliderSilence.value(SILENCE_THRESHOLD);
+    sliderTreble.value(TREBLE_WAVE_THRESHOLD);
+    sliderSwapPeak.value(SWAP_PEAK_THRESHOLD);
 }
 
 function swapRandomCells() {
@@ -198,24 +262,18 @@ function addRandomFigures() {
 }
 
 function removeRandomFigures(isFast = false) {
-    let removed = false;
     const candidates = [];
     for (let i = 0; i < densityMap.length; i++) {
         if (densityMap[i] > baseDensityMap[i]) candidates.push(i);
     }
-    if (candidates.length === 0) {
-        removeMode = false;
-        return;
-    }
+    if (candidates.length === 0) return;
     const removeCount = isFast ? min(floor(random(2, 5)) * 4, candidates.length) : min(3, candidates.length);
     for (let k = 0; k < removeCount; k++) {
         const idx = candidates[floor(random(candidates.length))];
         if (densityMap[idx] > baseDensityMap[idx]) {
             densityMap[idx]--;
-            removed = true;
         }
     }
-    if (!removed) removeMode = false;
 }
 
 function applyWaveEffect() {
@@ -226,7 +284,7 @@ function applyWaveEffect() {
         waveProgress -= WAVE_SPEED;
         if (waveProgress < 0) waveProgress = 0;
     }
-    if (!waveHold && waveProgress === 0) {
+    if (!waveHold && waveProgress <= 0) {
         waveActive = false;
         waveReleasing = false;
         waveOverlayMap.fill(0);
@@ -263,13 +321,9 @@ function drawCells() {
             const repeats = densityMap[index] + waveOverlayMap[index];
             const cellX = col * cellSize;
             const cellY = row * cellSize;
-            drawCellFigures(cellX, cellY, repeats);
+            drawCellFigures(cellX, cellY, repeats, index);
         }
     }
-}
-
-function fract(value) {
-    return value - floor(value);
 }
 
 function stableRandom(seed) {
@@ -280,10 +334,9 @@ function stableRandomRange(seed, min, max) {
     return min + stableRandom(seed) * (max - min);
 }
 
-function drawCellFigures(cellX, cellY, repeats) {
+function drawCellFigures(cellX, cellY, repeats, cellIndex) {
     const centerX = cellX + cellSize / 2;
     const centerY = cellY + cellSize / 2;
-    const cellIndex = floor(cellY / cellSize) * GRID_SIZE + floor(cellX / cellSize);
 
     for (let i = 0; i < repeats; i++) {
         const baseSize = stableRandomRange(cellIndex * 100 + i * 7 + 1, cellSize * 0.55, cellSize * 0.85);
