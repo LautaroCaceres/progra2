@@ -1,4 +1,4 @@
-const GRID_SIZE = 6;
+﻿const GRID_SIZE = 6;
 const LOW_DENSITY_REPEATS = [1, 3];
 const MEDIUM_DENSITY_REPEATS = [10, 15];
 const HIGH_DENSITY_REPEATS = [30, 40];
@@ -22,7 +22,8 @@ const TREBLE_WAVE_THRESHOLD = 60;
 let cellSize;
 let densityMap = [];
 let baseDensityMap = [];
-let tremorActive = false;
+let tremorActive = true;
+let currentVol = 0;
 let waveActive = false;
 let waveHold = false;
 let waveReleasing = false;
@@ -52,7 +53,7 @@ function setup() {
     baseDensityMap = densityMap.slice();
     waveOverlayMap = Array(GRID_SIZE * GRID_SIZE).fill(0);
 
-    labelSilence = createDiv("Umbral de silencio (temblor / densidad)");
+    labelSilence = createDiv("Umbral de silencio (densidad)");
     labelSilence.position(10, 730);
     labelSilence.style("font-size", "12px");
     labelSilence.hide();
@@ -154,12 +155,11 @@ function processSounds() {
     const vol = fft.getEnergy(20, 20000) / 255;
     const trebleEnergy = fft.getEnergy("treble");
 
+    currentVol = vol;
+
     const silenceVal = sliderSilence.value();
     const trebleVal = sliderTreble.value();
     const swapPeakVal = sliderSwapPeak.value();
-
-    // Temblor: silencio → tiembla, ruido → no tiembla
-    tremorActive = vol < silenceVal;
 
     // Hablar normal o grave → agrega figuras
     if (vol > silenceVal && trebleEnergy < trebleVal) {
@@ -326,6 +326,10 @@ function drawCells() {
     }
 }
 
+function fract(value) {
+    return value - floor(value);
+}
+
 function stableRandom(seed) {
     return fract(sin(seed) * 43758.5453123);
 }
@@ -343,10 +347,9 @@ function drawCellFigures(cellX, cellY, repeats, cellIndex) {
         let jitterX = stableRandomRange(cellIndex * 100 + i * 7 + 2, -cellSize * CELL_CENTER_JITTER, cellSize * CELL_CENTER_JITTER);
         let jitterY = stableRandomRange(cellIndex * 100 + i * 7 + 3, -cellSize * CELL_CENTER_JITTER, cellSize * CELL_CENTER_JITTER);
 
-        if (tremorActive) {
-            jitterX += random(-TREMOR_INTENSITY * cellSize, TREMOR_INTENSITY * cellSize);
-            jitterY += random(-TREMOR_INTENSITY * cellSize, TREMOR_INTENSITY * cellSize);
-        }
+        const tremorAmount = TREMOR_INTENSITY * (1 + currentVol * 3);
+        jitterX += random(-tremorAmount * cellSize, tremorAmount * cellSize);
+        jitterY += random(-tremorAmount * cellSize, tremorAmount * cellSize);
 
         const squareCenterX = centerX + jitterX;
         const squareCenterY = centerY + jitterY;
