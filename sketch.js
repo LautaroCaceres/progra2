@@ -12,9 +12,9 @@ const MAX_FIGURES_PER_CELL = 40;
 const TREMOR_INTENSITY = 0.02;
 const WAVE_SPEED = 0.04;
 const REMOVE_INTERVAL = 6;
+const OVERFLOW_CHANCE = 0.18;
 
-// Umbrales de sonido (valores iniciales, ajustables con el menú)
-const SILENCE_THRESHOLD = 0.05;
+const SILENCE_THRESHOLD = 0.02;
 const SWAP_PEAK_THRESHOLD = 0.05;
 const SWAP_COOLDOWN = 60;
 const TREBLE_WAVE_THRESHOLD = 60;
@@ -22,8 +22,9 @@ const TREBLE_WAVE_THRESHOLD = 60;
 let cellSize;
 let densityMap = [];
 let baseDensityMap = [];
-let tremorActive = true;
 let currentVol = 0;
+let currentTreble = 0;
+let currentPeak = 0;
 let waveActive = false;
 let waveHold = false;
 let waveReleasing = false;
@@ -32,18 +33,21 @@ let waveOverlayMap = [];
 let addFigureCounter = 0;
 let removeCounter = 0;
 
-// Variables de sonido
 let mic;
 let fft;
 let audioStarted = false;
 let prevAmplitude = 0;
 let swapCooldown = 0;
 
-// Variables del menú de ajuste
 let sliderSilence, sliderTreble, sliderSwapPeak;
 let menuVisible = false;
 let labelSilence, labelTreble, labelSwapPeak;
 let resetButton;
+
+// barras de nivel
+let meterVolContainer, meterVolBar;
+let meterTrebleContainer, meterTrebleBar;
+let meterPeakContainer, meterPeakBar;
 
 function setup() {
     const canvas = createCanvas(720, 720);
@@ -53,35 +57,89 @@ function setup() {
     baseDensityMap = densityMap.slice();
     waveOverlayMap = Array(GRID_SIZE * GRID_SIZE).fill(0);
 
-    labelSilence = createDiv("Umbral de silencio (densidad)");
+    // --- SILENCIO ---
+    labelSilence = createDiv("Umbral de silencio (densidad) — min: 0.01 / max: 0.30");
     labelSilence.position(10, 730);
     labelSilence.style("font-size", "12px");
     labelSilence.hide();
 
     sliderSilence = createSlider(0.01, 0.3, SILENCE_THRESHOLD, 0.01);
-    sliderSilence.position(10, 750);
+    sliderSilence.position(10, 748);
+    sliderSilence.style("width", "200px");
     sliderSilence.hide();
 
-    labelTreble = createDiv("Umbral de agudos (ola)");
-    labelTreble.position(10, 780);
+    meterVolContainer = createDiv("");
+    meterVolContainer.position(220, 748);
+    meterVolContainer.style("width", "200px");
+    meterVolContainer.style("height", "14px");
+    meterVolContainer.style("background", "#ccc");
+    meterVolContainer.style("border-radius", "3px");
+    meterVolContainer.style("overflow", "hidden");
+    meterVolContainer.hide();
+
+    meterVolBar = createDiv("");
+    meterVolBar.parent(meterVolContainer);
+    meterVolBar.style("height", "100%");
+    meterVolBar.style("width", "0%");
+    meterVolBar.style("background", "#4CAF50");
+    meterVolBar.style("transition", "width 0.05s");
+
+    // --- AGUDOS ---
+    labelTreble = createDiv("Umbral de agudos (ola) — min: 10 / max: 150");
+    labelTreble.position(10, 778);
     labelTreble.style("font-size", "12px");
     labelTreble.hide();
 
     sliderTreble = createSlider(10, 150, TREBLE_WAVE_THRESHOLD, 1);
-    sliderTreble.position(10, 800);
+    sliderTreble.position(10, 796);
+    sliderTreble.style("width", "200px");
     sliderTreble.hide();
 
-    labelSwapPeak = createDiv("Sensibilidad de pico (swap / aplauso)");
-    labelSwapPeak.position(10, 830);
+    meterTrebleContainer = createDiv("");
+    meterTrebleContainer.position(220, 796);
+    meterTrebleContainer.style("width", "200px");
+    meterTrebleContainer.style("height", "14px");
+    meterTrebleContainer.style("background", "#ccc");
+    meterTrebleContainer.style("border-radius", "3px");
+    meterTrebleContainer.style("overflow", "hidden");
+    meterTrebleContainer.hide();
+
+    meterTrebleBar = createDiv("");
+    meterTrebleBar.parent(meterTrebleContainer);
+    meterTrebleBar.style("height", "100%");
+    meterTrebleBar.style("width", "0%");
+    meterTrebleBar.style("background", "#5080DC");
+    meterTrebleBar.style("transition", "width 0.05s");
+
+    // --- PICO ---
+    labelSwapPeak = createDiv("Sensibilidad de pico (swap) — min: 0.01 / max: 0.30");
+    labelSwapPeak.position(10, 826);
     labelSwapPeak.style("font-size", "12px");
     labelSwapPeak.hide();
 
     sliderSwapPeak = createSlider(0.01, 0.3, SWAP_PEAK_THRESHOLD, 0.01);
-    sliderSwapPeak.position(10, 850);
+    sliderSwapPeak.position(10, 844);
+    sliderSwapPeak.style("width", "200px");
     sliderSwapPeak.hide();
 
+    meterPeakContainer = createDiv("");
+    meterPeakContainer.position(220, 844);
+    meterPeakContainer.style("width", "200px");
+    meterPeakContainer.style("height", "14px");
+    meterPeakContainer.style("background", "#ccc");
+    meterPeakContainer.style("border-radius", "3px");
+    meterPeakContainer.style("overflow", "hidden");
+    meterPeakContainer.hide();
+
+    meterPeakBar = createDiv("");
+    meterPeakBar.parent(meterPeakContainer);
+    meterPeakBar.style("height", "100%");
+    meterPeakBar.style("width", "0%");
+    meterPeakBar.style("background", "#DC5050");
+    meterPeakBar.style("transition", "width 0.05s");
+
     resetButton = createButton("Restablecer valores");
-    resetButton.position(10, 880);
+    resetButton.position(10, 876);
     resetButton.mousePressed(resetSliders);
     resetButton.hide();
 }
@@ -110,6 +168,9 @@ function keyPressed() {
             labelSilence.show();
             labelTreble.show();
             labelSwapPeak.show();
+            meterVolContainer.show();
+            meterTrebleContainer.show();
+            meterPeakContainer.show();
             resetButton.show();
         } else {
             sliderSilence.hide();
@@ -118,6 +179,9 @@ function keyPressed() {
             labelSilence.hide();
             labelTreble.hide();
             labelSwapPeak.hide();
+            meterVolContainer.hide();
+            meterTrebleContainer.hide();
+            meterPeakContainer.hide();
             resetButton.hide();
         }
         return false;
@@ -126,7 +190,6 @@ function keyPressed() {
 
 function draw() {
     background(255);
-    drawGridLines();
 
     if (audioStarted) {
         processSounds();
@@ -138,6 +201,15 @@ function draw() {
 
     drawCells();
     drawGrain();
+
+    if (menuVisible && audioStarted) {
+        const volPct = constrain(currentVol / 0.3, 0, 1) * 100;
+        const treblePct = constrain(currentTreble / 150, 0, 1) * 100;
+        const peakPct = constrain(currentPeak / 0.3, 0, 1) * 100;
+        meterVolBar.style("width", volPct + "%");
+        meterTrebleBar.style("width", treblePct + "%");
+        meterPeakBar.style("width", peakPct + "%");
+    }
 }
 
 function drawGrain() {
@@ -156,12 +228,13 @@ function processSounds() {
     const trebleEnergy = fft.getEnergy("treble");
 
     currentVol = vol;
+    currentTreble = trebleEnergy;
+    currentPeak = max(0, vol - prevAmplitude);
 
     const silenceVal = sliderSilence.value();
     const trebleVal = sliderTreble.value();
     const swapPeakVal = sliderSwapPeak.value();
 
-    // Hablar normal o grave → agrega figuras
     if (vol > silenceVal && trebleEnergy < trebleVal) {
         addFigureCounter++;
         if (addFigureCounter >= 6) {
@@ -172,7 +245,6 @@ function processSounds() {
         addFigureCounter = 0;
     }
 
-    // Silencio → quita figuras
     if (vol < silenceVal) {
         removeCounter++;
         if (removeCounter >= REMOVE_INTERVAL) {
@@ -183,7 +255,6 @@ function processSounds() {
         removeCounter = 0;
     }
 
-    // Swap: pico repentino de volumen (aplauso)
     if (swapCooldown > 0) swapCooldown--;
     const peak = vol - prevAmplitude;
     if (peak > swapPeakVal && swapCooldown === 0) {
@@ -192,7 +263,6 @@ function processSounds() {
     }
     prevAmplitude = vol;
 
-    // Ola: agudos (ssss, silbido)
     const isWave = trebleEnergy > trebleVal && vol > silenceVal;
     if (isWave && !waveHold) {
         waveHold = true;
@@ -231,7 +301,6 @@ function generateDensityMap() {
     const totalCells = GRID_SIZE * GRID_SIZE;
     const lowCount = floor(totalCells * 0.20);
     const mediumCount = floor(totalCells * 0.45);
-    const highCount = totalCells - lowCount - mediumCount;
     const allIndexes = Array.from({ length: totalCells }, (_, i) => i);
     const shuffled = shuffle(allIndexes);
     const lowIndexes = new Set(shuffled.slice(0, lowCount));
@@ -300,20 +369,7 @@ function applyWaveEffect() {
     }
 }
 
-function drawGridLines() {
-    stroke(GRID_COLOR);
-    strokeWeight(STROKE_WEIGHT_GRID);
-    noFill();
-    for (let i = 0; i <= GRID_SIZE; i++) {
-        const position = i * cellSize;
-        line(position, 0, position, height);
-        line(0, position, width, position);
-    }
-}
-
 function drawCells() {
-    stroke(DRAW_COLOR);
-    strokeWeight(STROKE_WEIGHT_SHAPE);
     noFill();
     for (let row = 0; row < GRID_SIZE; row++) {
         for (let col = 0; col < GRID_SIZE; col++) {
@@ -344,21 +400,22 @@ function drawCellFigures(cellX, cellY, repeats, cellIndex) {
 
     for (let i = 0; i < repeats; i++) {
         const baseSize = stableRandomRange(cellIndex * 100 + i * 7 + 1, cellSize * 0.55, cellSize * 0.85);
-        let jitterX = stableRandomRange(cellIndex * 100 + i * 7 + 2, -cellSize * CELL_CENTER_JITTER, cellSize * CELL_CENTER_JITTER);
-        let jitterY = stableRandomRange(cellIndex * 100 + i * 7 + 3, -cellSize * CELL_CENTER_JITTER, cellSize * CELL_CENTER_JITTER);
-
-        const tremorAmount = TREMOR_INTENSITY * (1 + currentVol * 3);
-        jitterX += random(-tremorAmount * cellSize, tremorAmount * cellSize);
-        jitterY += random(-tremorAmount * cellSize, tremorAmount * cellSize);
+        const jitterX = stableRandomRange(cellIndex * 100 + i * 7 + 2, -cellSize * CELL_CENTER_JITTER, cellSize * CELL_CENTER_JITTER);
+        const jitterY = stableRandomRange(cellIndex * 100 + i * 7 + 3, -cellSize * CELL_CENTER_JITTER, cellSize * CELL_CENTER_JITTER);
 
         const squareCenterX = centerX + jitterX;
         const squareCenterY = centerY + jitterY;
-        drawJitteredSquare(squareCenterX, squareCenterY, baseSize, cellX, cellY, cellSize, cellIndex, i);
+
+        const canOverflow = stableRandom(cellIndex * 100 + i * 7 + 50) < OVERFLOW_CHANCE;
+
+        drawJitteredSquare(squareCenterX, squareCenterY, baseSize, cellX, cellY, cellSize, cellIndex, i, canOverflow);
     }
 }
 
-function drawJitteredSquare(cx, cy, size, cellX, cellY, cellWidth, cellIndex, shapeIndex) {
+function drawJitteredSquare(cx, cy, size, cellX, cellY, cellWidth, cellIndex, shapeIndex, canOverflow) {
     const half = size / 2;
+    const tremorAmount = TREMOR_INTENSITY * (1 + currentVol * 3);
+
     const vertices = [
         { x: -half, y: -half },
         { x: half, y: -half },
@@ -367,11 +424,25 @@ function drawJitteredSquare(cx, cy, size, cellX, cellY, cellWidth, cellIndex, sh
     ].map((vertex, vIndex) => {
         const jitterX = stableRandomRange(cellIndex * 100 + shapeIndex * 10 + vIndex * 3 + 4, -VERTEX_JITTER[1] * size, VERTEX_JITTER[1] * size);
         const jitterY = stableRandomRange(cellIndex * 100 + shapeIndex * 10 + vIndex * 3 + 5, -VERTEX_JITTER[1] * size, VERTEX_JITTER[1] * size);
-        const finalX = cx + vertex.x + jitterX;
-        const finalY = cy + vertex.y + jitterY;
-        const constrainedX = constrain(finalX, cellX, cellX + cellWidth);
-        const constrainedY = constrain(finalY, cellY, cellY + cellWidth);
-        return { x: constrainedX, y: constrainedY };
+
+        const tX = random(-tremorAmount * size, tremorAmount * size);
+        const tY = random(-tremorAmount * size, tremorAmount * size);
+
+        const finalX = cx + vertex.x + jitterX + tX;
+        const finalY = cy + vertex.y + jitterY + tY;
+
+        if (canOverflow) {
+            const margin = cellWidth * 0.5;
+            return {
+                x: constrain(finalX, cellX - margin, cellX + cellWidth + margin),
+                y: constrain(finalY, cellY - margin, cellY + cellWidth + margin)
+            };
+        } else {
+            return {
+                x: constrain(finalX, cellX, cellX + cellWidth),
+                y: constrain(finalY, cellY, cellY + cellWidth)
+            };
+        }
     });
 
     const segments = 2;
